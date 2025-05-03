@@ -1,0 +1,1 @@
+Generar recibos de pago
