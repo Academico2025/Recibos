@@ -1,0 +1,609 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Recibos de Pago</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .form-section, .history-section {
+            flex: 1;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #218838;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .action-buttons button {
+            margin-right: 5px;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .action-buttons button.download {
+            background-color: #007bff;
+        }
+        .action-buttons button.download:hover {
+            background-color: #0056b3;
+        }
+        .action-buttons button.print {
+            background-color: #ff5733;
+        }
+        .action-buttons button.print:hover {
+            background-color: #c70039;
+        }
+        .action-buttons button.edit {
+            background-color: #ffc107;
+        }
+        .action-buttons button.edit:hover {
+            background-color: #e0a800;
+        }
+        .action-buttons button.delete {
+            background-color: #dc3545;
+        }
+        .action-buttons button.delete:hover {
+            background-color: #b02a37;
+        }
+        #ieForm {
+            display: none;
+            margin-bottom: 20px;
+        }
+        #ieInfo {
+            margin-bottom: 10px;
+        }
+        #loginSection {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            display: none;
+        }
+        #appSection {
+            display: none;
+        }
+        #ieLogoPreview {
+            max-width: 100px;
+            max-height: 100px;
+            margin: 10px 0;
+        }
+        #watermarkCanvas {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loginSection">
+        <h2>Iniciar Sesión</h2>
+        <label for="username">Usuario:</label>
+        <input type="text" id="username" placeholder="Ej. admin">
+        <label for="password">Contraseña:</label>
+        <input type="password" id="password" placeholder="Contraseña">
+        <button onclick="login()">Iniciar Sesión</button>
+        <p id="loginError" style="color: red; display: none;">Usuario o contraseña incorrectos.</p>
+        <p>Usuario predeterminado: <strong>admin</strong> | Contraseña: <strong>password123</strong></p>
+    </div>
+
+    <div id="appSection">
+        <h1>Generador de Recibos de Pago</h1>
+        <button onclick="logout()">Cerrar Sesión</button>
+        <div class="container">
+            <div class="form-section">
+                <h2>Datos de la Institución Educativa</h2>
+                <div id="ieInfo"></div>
+                <button onclick="showIeForm()">Editar Datos de la IE</button>
+                <div id="ieForm">
+                    <label for="ieName">Nombre de la IE:</label>
+                    <input type="text" id="ieName" placeholder="Ej. Colegio San Juan">
+                    <label for="ieAddress">Dirección:</label>
+                    <input type="text" id="ieAddress" placeholder="Ej. Av. Principal 123">
+                    <label for="iePhone">Teléfono:</label>
+                    <input type="text" id="iePhone" placeholder="Ej. (01) 123-4567">
+                    <label for="ieRut">RUT:</label>
+                    <input type="text" id="ieRut" placeholder="Ej. 20123456789">
+                    <label for="ieLogo">Ícono de la IE (opcional):</label>
+                    <input type="file" id="ieLogo" accept="image/*">
+                    <img id="ieLogoPreview" src="" alt="" style="display: none;">
+                    <button onclick="saveIeData()">Guardar Datos</button>
+                    <button onclick="hideIeForm()">Cancelar</button>
+                </div>
+
+                <h2 id="formTitle">Datos del Recibo</h2>
+                <label for="receiptNumber">Número de Recibo:</label>
+                <input type="text" id="receiptNumber" placeholder="Ej. 001-000123">
+                <label for="payerName">Nombre del Pagador:</label>
+                <input type="text" id="payerName" placeholder="Ej. Juan Pérez">
+                <label for="concept">Concepto:</label>
+                <input type="text" id="concept" placeholder="Ej. Pago de matrícula">
+                <label for="amount">Valor ($):</label>
+                <input type="number" id="amount" step="0.01" placeholder="Ej. 150.50">
+                <label for="paymentDate">Fecha de Pago:</label>
+                <input type="date" id="paymentDate">
+                <button id="saveReceiptButton" onclick="saveReceipt()">Generar Recibo</button>
+            </div>
+            <div class="history-section">
+                <h2>Historial de Recibos</h2>
+                <button onclick="exportToExcel()">Exportar a Excel</button>
+                <table id="receiptTable">
+                    <thead>
+                        <tr>
+                            <th>Número</th>
+                            <th>Pagador</th>
+                            <th>Concepto</th>
+                            <th>Valor</th>
+                            <th>Fecha</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="receiptTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="watermarkCanvas" width="500" height="400"></canvas>
+
+    <script>
+        const { jsPDF } = window.jspdf;
+
+        // Cargar datos de la IE, recibos y usuarios desde localStorage
+        let ieData = JSON.parse(localStorage.getItem('ieData')) || {};
+        let receipts = JSON.parse(localStorage.getItem('receipts')) || [];
+        let users = JSON.parse(localStorage.getItem('users')) || {
+            admin: { username: 'admin', password: 'password123' }
+        };
+        let isAuthenticated = false;
+        let editingIndex = null;
+
+        // Función para generar imagen de fondo con texto (ORIGINAL o COPIA)
+        function createWatermark(text) {
+            const canvas = document.getElementById('watermarkCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // Limpiar canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Configurar texto
+            ctx.font = '80px Arial';
+            ctx.fillStyle = 'rgba(128, 128, 128, 0.3)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            // Rotar texto en diagonal
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate(-Math.PI / 4);
+            ctx.fillText(text, 0, 0);
+
+            // Resetear transformaciones
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+            return canvas.toDataURL('image/png');
+        }
+
+        // Generar imágenes de fondo
+        const originalWatermark = createWatermark('ORIGINAL');
+        const copyWatermark = createWatermark('COPIA');
+
+        // Función para guardar usuarios en localStorage
+        function saveUsers() {
+            localStorage.setItem('users', JSON.stringify(users));
+        }
+
+        // Función para iniciar sesión
+        function login() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const loginError = document.getElementById('loginError');
+
+            if (users[username] && users[username].password === password) {
+                isAuthenticated = true;
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('appSection').style.display = 'block';
+                initApp();
+            } else {
+                loginError.style.display = 'block';
+            }
+        }
+
+        // Función para cerrar sesión
+        function logout() {
+            isAuthenticated = false;
+            document.getElementById('loginSection').style.display = 'block';
+            document.getElementById('appSection').style.display = 'none';
+            document.getElementById('username').value = '';
+            document.getElementById('password').value = '';
+            document.getElementById('loginError').style.display = 'none';
+        }
+
+        // Función para manejar la carga del ícono
+        function handleLogoUpload(callback) {
+            const ieLogoInput = document.getElementById('ieLogo');
+            const ieLogoPreview = document.getElementById('ieLogoPreview');
+            if (ieLogoInput.files && ieLogoInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    ieLogoPreview.src = e.target.result;
+                    ieLogoPreview.style.display = 'block';
+                    callback(e.target.result);
+                };
+                reader.readAsDataURL(ieLogoInput.files[0]);
+            } else {
+                callback(ieData.ieLogo || '');
+            }
+        }
+
+        // Función para guardar datos de la IE en localStorage
+        function saveIeData() {
+            handleLogoUpload(function(logoData) {
+                ieData = {
+                    ieName: document.getElementById('ieName').value,
+                    ieAddress: document.getElementById('ieAddress').value,
+                    iePhone: document.getElementById('iePhone').value,
+                    ieRut: document.getElementById('ieRut').value,
+                    ieLogo: logoData
+                };
+
+                if (!ieData.ieName || !ieData.ieAddress || !ieData.iePhone || !ieData.ieRut) {
+                    alert('Por favor, complete todos los campos obligatorios de la IE.');
+                    return;
+                }
+
+                localStorage.setItem('ieData', JSON.stringify(ieData));
+                updateIeInfo();
+                hideIeForm();
+                alert('Datos de la IE guardados con éxito.');
+            });
+        }
+
+        // Función para mostrar los datos de la IE
+        function updateIeInfo() {
+            const ieInfo = document.getElementById('ieInfo');
+            if (ieData.ieName) {
+                ieInfo.innerHTML = `
+                    ${ieData.ieLogo ? `<img src="${ieData.ieLogo}" style="max-width: 100px; max-height: 100px; margin-bottom: 10px;" alt="Logo IE">` : ''}
+                    <p><strong>Nombre:</strong> ${ieData.ieName}</p>
+                    <p><strong>Dirección:</strong> ${ieData.ieAddress}</p>
+                    <p><strong>Teléfono:</strong> ${ieData.iePhone}</p>
+                    <p><strong>RUT:</strong> ${ieData.ieRut}</p>
+                `;
+            } else {
+                ieInfo.innerHTML = '<p>No se han ingresado datos de la IE.</p>';
+            }
+        }
+
+        // Función para mostrar el formulario de la IE
+        function showIeForm() {
+            const ieForm = document.getElementById('ieForm');
+            ieForm.style.display = 'block';
+            document.getElementById('ieName').value = ieData.ieName || '';
+            document.getElementById('ieAddress').value = ieData.ieAddress || '';
+            document.getElementById('iePhone').value = ieData.iePhone || '';
+            document.getElementById('ieRut').value = ieData.ieRut || '';
+            const ieLogoPreview = document.getElementById('ieLogoPreview');
+            if (ieData.ieLogo) {
+                ieLogoPreview.src = ieData.ieLogo;
+                ieLogoPreview.style.display = 'block';
+            } else {
+                ieLogoPreview.style.display = 'none';
+            }
+        }
+
+        // Función para ocultar el formulario de la IE
+        function hideIeForm() {
+            document.getElementById('ieForm').style.display = 'none';
+        }
+
+        // Función para guardar recibos en localStorage
+        function saveReceipts() {
+            localStorage.setItem('receipts', JSON.stringify(receipts));
+        }
+
+        // Función para actualizar la tabla de recibos
+        function updateReceiptTable() {
+            const tableBody = document.getElementById('receiptTableBody');
+            tableBody.innerHTML = '';
+            receipts.forEach((receipt, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${receipt.number}</td>
+                    <td>${receipt.payer}</td>
+                    <td>${receipt.concept}</td>
+                    <td>$ ${receipt.amount}</td>
+                    <td>${receipt.date}</td>
+                    <td class="action-buttons">
+                        <button class="download" onclick="downloadPDF(${index})">Descargar PDF</button>
+                        <button class="print" onclick="printPDF(${index})">Imprimir</button>
+                        <button class="edit" onclick="editReceipt(${index})">Editar</button>
+                        <button class="delete" onclick="deleteReceipt(${index})">Eliminar</button>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        }
+
+        // Función para editar un recibo
+        function editReceipt(index) {
+            const receipt = receipts[index];
+            editingIndex = index;
+
+            // Cargar datos en el formulario
+            document.getElementById('receiptNumber').value = receipt.number;
+            document.getElementById('payerName').value = receipt.payer;
+            document.getElementById('concept').value = receipt.concept;
+            document.getElementById('amount').value = receipt.amount;
+            document.getElementById('paymentDate').value = receipt.date;
+
+            // Actualizar título y botón del formulario
+            document.getElementById('formTitle').textContent = 'Editar Recibo';
+            const saveButton = document.getElementById('saveReceiptButton');
+            saveButton.textContent = 'Guardar Cambios';
+            saveButton.onclick = saveReceipt;
+        }
+
+        // Función para eliminar un recibo con advertencia
+        function deleteReceipt(index) {
+            if (confirm('¿Estás seguro de que deseas eliminar este recibo? Esta acción no se puede deshacer.')) {
+                receipts.splice(index, 1);
+                saveReceipts();
+                updateReceiptTable();
+                alert('Recibo eliminado con éxito.');
+            }
+        }
+
+        // Función para guardar o actualizar un recibo
+        function saveReceipt() {
+            if (!ieData.ieName) {
+                alert('Por favor, ingrese los datos de la IE primero.');
+                showIeForm();
+                return;
+            }
+
+            const receipt = {
+                ieName: ieData.ieName,
+                ieAddress: ieData.ieAddress,
+                iePhone: ieData.iePhone,
+                ieRut: ieData.ieRut,
+                ieLogo: ieData.ieLogo,
+                number: document.getElementById('receiptNumber').value,
+                payer: document.getElementById('payerName').value,
+                concept: document.getElementById('concept').value,
+                amount: document.getElementById('amount').value,
+                date: document.getElementById('paymentDate').value
+            };
+
+            if (!receipt.number || !receipt.payer || !receipt.concept || !receipt.amount || !receipt.date) {
+                alert('Por favor, complete todos los campos del recibo.');
+                return;
+            }
+
+            if (editingIndex !== null) {
+                // Actualizar recibo existente
+                receipts[editingIndex] = receipt;
+                editingIndex = null;
+                alert('Recibo actualizado con éxito.');
+            } else {
+                // Agregar nuevo recibo
+                receipts.push(receipt);
+                alert('Recibo generado con éxito.');
+            }
+
+            saveReceipts();
+            updateReceiptTable();
+
+            // Resetear formulario
+            document.getElementById('receiptNumber').value = '';
+            document.getElementById('payerName').value = '';
+            document.getElementById('concept').value = '';
+            document.getElementById('amount').value = '';
+            document.getElementById('paymentDate').value = '';
+            document.getElementById('formTitle').textContent = 'Datos del Recibo';
+            const saveButton = document.getElementById('saveReceiptButton');
+            saveButton.textContent = 'Generar Recibo';
+            saveButton.onclick = saveReceipt;
+        }
+
+        // Función para generar el contenido del recibo
+        function generateReceiptContent(doc, receipt, type, yOffset, watermark, watermarkYOffset) {
+            // Agregar imagen de fondo (marca de agua) ajustada al tamaño de la sección
+            doc.addImage(watermark, 'PNG', 10, watermarkYOffset, 190, 130); // Ajustado a 190 mm x 130 mm
+
+            // Agregar ícono si existe
+            if (receipt.ieLogo) {
+                doc.addImage(receipt.ieLogo, 'PNG', 150, yOffset, 40, 40);
+            }
+
+            doc.setFontSize(16);
+            doc.text(receipt.ieName, 20, yOffset + 10);
+            doc.setFontSize(12);
+            doc.text(`Dirección: ${receipt.ieAddress}`, 20, yOffset + 20);
+            doc.text(`Teléfono: ${receipt.iePhone}`, 20, yOffset + 25);
+            doc.text(`RUT: ${receipt.ieRut}`, 20, yOffset + 30);
+            doc.setFontSize(14);
+            doc.text(`RECIBO DE PAGO - ${type}`, 20, yOffset + 40);
+            doc.setFontSize(12);
+            doc.text(`Número: ${receipt.number}`, 20, yOffset + 50);
+            doc.text(`Pagador: ${receipt.payer}`, 20, yOffset + 60);
+            doc.text(`Concepto: ${receipt.concept}`, 20, yOffset + 70);
+            doc.text(`Valor: $ ${receipt.amount}`, 20, yOffset + 80);
+            doc.text(`Fecha: ${receipt.date}`, 20, yOffset + 90);
+        }
+
+        // Función para generar y descargar PDF (ORIGINAL y COPIA)
+        function downloadPDF(index) {
+            const receipt = receipts[index];
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'letter' // Tamaño carta
+            });
+
+            // Generar ORIGINAL (marca de agua en la parte superior)
+            generateReceiptContent(doc, receipt, 'ORIGINAL', 20, originalWatermark, 10);
+
+            // Agregar línea separadora
+            doc.setLineWidth(0.5);
+            doc.line(20, 140, 190, 140);
+
+            // Generar COPIA (marca de agua en la parte inferior)
+            generateReceiptContent(doc, receipt, 'COPIA', 150, copyWatermark, 140);
+
+            // Descargar el PDF
+            doc.save(`recibo_${receipt.number}.pdf`);
+        }
+
+        // Función para imprimir PDF (ORIGINAL y COPIA)
+        function printPDF(index) {
+            const receipt = receipts[index];
+            const doc = new jsPDF({
+                orientation: 'portrait',
+                unit: 'mm',
+                format: 'letter' // Tamaño carta
+            });
+
+            // Generar ORIGINAL (marca de agua en la parte superior)
+            generateReceiptContent(doc, receipt, 'ORIGINAL', 20, originalWatermark, 10);
+
+            // Agregar línea separadora
+            doc.setLineWidth(0.5);
+            doc.line(20, 140, 190, 140);
+
+            // Generar COPIA (marca de agua en la parte inferior)
+            generateReceiptContent(doc, receipt, 'COPIA', 150, copyWatermark, 140);
+
+            // Abrir ventana de impresión
+            const pdfOutput = doc.output('bloburl');
+            const printWindow = window.open(pdfOutput);
+            printWindow.print();
+        }
+
+        // Función para exportar a Excel
+        function exportToExcel() {
+            const ws_data = receipts.map(receipt => ({
+                'Nombre IE': receipt.ieName,
+                'Dirección': receipt.ieAddress,
+                'Teléfono': receipt.iePhone,
+                'RUT': receipt.ieRut,
+                'Número': receipt.number,
+                'Pagador': receipt.payer,
+                'Concepto': receipt.concept,
+                'Valor': receipt.amount,
+                'Fecha': receipt.date
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(ws_data);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Recibos');
+            XLSX.writeFile(wb, 'recibos_pago.xlsx');
+        }
+
+        // Inicializar la aplicación
+        function initApp() {
+            updateIeInfo();
+            updateReceiptTable();
+            if (!ieData.ieName) {
+                showIeForm();
+            }
+        }
+
+        // Inicializar la página
+        function init() {
+            if (!isAuthenticated) {
+                document.getElementById('loginSection').style.display = 'block';
+                document.getElementById('appSection').style.display = 'none';
+            } else {
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('appSection').style.display = 'block';
+                initApp();
+            }
+        }
+
+        // Ejecutar inicialización
+        init();
+    </script>
+</body>
+</html>
