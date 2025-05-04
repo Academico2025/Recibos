@@ -57,7 +57,7 @@
             display: flex;
             gap: 20px;
         }
-        .form-section, .history-section {
+        .form-section, .history-section, .user-section {
             flex: 1;
             padding: 20px;
             border: 1px solid #ccc;
@@ -130,11 +130,11 @@
         .action-buttons button.delete:hover {
             background-color: #b02a37;
         }
-        #ieForm {
+        #ieForm, #userForm {
             display: none;
             margin-bottom: 20px;
         }
-        #ieInfo {
+        #ieInfo, #userInfo {
             margin-bottom: 10px;
         }
         #loginSection {
@@ -156,6 +156,9 @@
         #watermarkCanvas, #barcodeCanvas {
             display: none;
         }
+        #userSection {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -167,7 +170,7 @@
         <input type="password" id="password" placeholder="Contraseña">
         <button onclick="login()">Iniciar Sesión</button>
         <p id="loginError" style="color: red; display: none;">Usuario o contraseña incorrectos.</p>
-        <p>Usuario predeterminado: <strong>admin</strong> | Contraseña: <strong>password123</strong></p>
+        <p>Usuario inicial: <strong>admin</strong> | Contraseña inicial: <strong>admin123</strong></p>
     </div>
 
     <div id="appSection">
@@ -227,6 +230,27 @@
                     <tbody id="receiptTableBody"></tbody>
                 </table>
             </div>
+            <div id="userSection" class="user-section">
+                <h2>Gestión de Usuarios</h2>
+                <button onclick="showUserForm()">Agregar Usuario</button>
+                <div id="userForm">
+                    <label for="newUsername">Nombre de Usuario:</label>
+                    <input type="text" id="newUsername" placeholder="Ej. usuario1">
+                    <label for="newPassword">Contraseña:</label>
+                    <input type="password" id="newPassword" placeholder="Contraseña">
+                    <button id="saveUserButton" onclick="saveUser()">Guardar Usuario</button>
+                    <button onclick="hideUserForm()">Cancelar</button>
+                </div>
+                <table id="userTable">
+                    <thead>
+                        <tr>
+                            <th>Usuario</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody"></tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -240,10 +264,12 @@
         let ieData = JSON.parse(localStorage.getItem('ieData')) || {};
         let receipts = JSON.parse(localStorage.getItem('receipts')) || [];
         let users = JSON.parse(localStorage.getItem('users')) || {
-            admin: { username: 'admin', password: 'password123' }
+            admin: { username: 'admin', password: 'admin123' }
         };
         let isAuthenticated = false;
         let editingIndex = null;
+        let editingUser = null;
+        let currentUser = null;
 
         // Función para generar imagen de fondo con texto (ORIGINAL o COPIA)
         function createWatermark(text) {
@@ -295,15 +321,6 @@
             return `${day}/${month}/${year}`;
         }
 
-        // Función para obtener la hora actual en formato HH:mm:ss
-        function getCurrentTime() {
-            const now = new Date();
-            const hours = String(now.getHours()).padStart(2, '0');
-            const minutes = String(now.getMinutes()).padStart(2, '0');
-            const seconds = String(now.getSeconds()).padStart(2, '0');
-            return `${hours}:${minutes}:${seconds}`;
-        }
-
         // Función para guardar usuarios en localStorage
         function saveUsers() {
             localStorage.setItem('users', JSON.stringify(users));
@@ -317,6 +334,7 @@
 
             if (users[username] && users[username].password === password) {
                 isAuthenticated = true;
+                currentUser = username;
                 document.getElementById('loginSection').style.display = 'none';
                 document.getElementById('appSection').style.display = 'block';
                 initApp();
@@ -328,11 +346,102 @@
         // Función para cerrar sesión
         function logout() {
             isAuthenticated = false;
+            currentUser = null;
             document.getElementById('loginSection').style.display = 'block';
             document.getElementById('appSection').style.display = 'none';
             document.getElementById('username').value = '';
             document.getElementById('password').value = '';
             document.getElementById('loginError').style.display = 'none';
+        }
+
+        // Función para mostrar el formulario de usuario
+        function showUserForm(user = null) {
+            const userForm = document.getElementById('userForm');
+            const newUsername = document.getElementById('newUsername');
+            const newPassword = document.getElementById('newPassword');
+            const saveUserButton = document.getElementById('saveUserButton');
+
+            userForm.style.display = 'block';
+            if (user) {
+                newUsername.value = user;
+                newPassword.value = users[user].password;
+                saveUserButton.textContent = 'Actualizar Usuario';
+                editingUser = user;
+            } else {
+                newUsername.value = '';
+                newPassword.value = '';
+                saveUserButton.textContent = 'Guardar Usuario';
+                editingUser = null;
+            }
+            newUsername.focus();
+        }
+
+        // Función para ocultar el formulario de usuario
+        function hideUserForm() {
+            document.getElementById('userForm').style.display = 'none';
+            document.getElementById('newUsername').value = '';
+            document.getElementById('newPassword').value = '';
+            editingUser = null;
+        }
+
+        // Función para guardar o actualizar un usuario
+        function saveUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value.trim();
+
+            if (!username || !password) {
+                alert('Por favor, complete todos los campos.');
+                return;
+            }
+
+            if (editingUser !== username && users[username]) {
+                alert('El nombre de usuario ya existe.');
+                return;
+            }
+
+            if (editingUser && editingUser !== username) {
+                // Cambiar el nombre de usuario
+                users[username] = { username, password };
+                delete users[editingUser];
+            } else {
+                users[username] = { username, password };
+            }
+
+            saveUsers();
+            updateUserTable();
+            hideUserForm();
+            alert(editingUser ? 'Usuario actualizado con éxito.' : 'Usuario agregado con éxito.');
+        }
+
+        // Función para eliminar un usuario
+        function deleteUser(username) {
+            if (username === 'admin') {
+                alert('No se puede eliminar el usuario administrador.');
+                return;
+            }
+            if (confirm(`¿Estás seguro de que deseas eliminar el usuario ${username}?`)) {
+                delete users[username];
+                saveUsers();
+                updateUserTable();
+                alert('Usuario eliminado con éxito.');
+            }
+        }
+
+        // Función para actualizar la tabla de usuarios
+        function updateUserTable() {
+            const userTableBody = document.getElementById('userTableBody');
+            userTableBody.innerHTML = '';
+            Object.keys(users).forEach(username => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${username}</td>
+                    <td class="action-buttons">
+                        <button class="edit" onclick="showUserForm('${username}')">Editar</button>
+                        ${username !== 'admin' ? `<button class="delete" onclick="deleteUser('${username}')">Eliminar</button>` : ''}
+                    </td>
+                `;
+                userTableBody.appendChild(row);
+            });
         }
 
         // Función para manejar la carga del ícono
@@ -554,7 +663,7 @@
             doc.text(`Documento: ${receipt.payerDocument}`, 20, yOffset + 65);
             doc.text(`Concepto: ${receipt.concept}`, 20, yOffset + 70);
             doc.text(`Valor: $ ${receipt.amount}`, 20, yOffset + 80);
-            doc.text(`Fecha: ${formatDate(receipt.date)} ${getCurrentTime()}`, 20, yOffset + 90);
+            doc.text(`Fecha: ${formatDate(receipt.date)}`, 20, yOffset + 90);
         }
 
         // Función para generar y descargar PDF (ORIGINAL y COPIA)
@@ -630,6 +739,12 @@
         function initApp() {
             updateIeInfo();
             updateReceiptTable();
+            updateUserTable();
+            if (currentUser === 'admin') {
+                document.getElementById('userSection').style.display = 'block';
+            } else {
+                document.getElementById('userSection').style.display = 'none';
+            }
             if (!ieData.ieName) {
                 showIeForm();
             }
