@@ -45,6 +45,7 @@
     <title>Generador de Recibos de Pago</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -152,7 +153,7 @@
             max-height: 100px;
             margin: 10px 0;
         }
-        #watermarkCanvas {
+        #watermarkCanvas, #barcodeCanvas {
             display: none;
         }
     </style>
@@ -198,6 +199,8 @@
                 <input type="text" id="receiptNumber" placeholder="Ej. 001-000123">
                 <label for="payerName">Nombre del Pagador:</label>
                 <input type="text" id="payerName" placeholder="Ej. Juan Pérez">
+                <label for="payerDocument">Documento del Pagador:</label>
+                <input type="text" id="payerDocument" placeholder="Ej. 12345678">
                 <label for="concept">Concepto:</label>
                 <input type="text" id="concept" placeholder="Ej. Pago de matrícula">
                 <label for="amount">Valor ($):</label>
@@ -214,6 +217,7 @@
                         <tr>
                             <th>Número</th>
                             <th>Pagador</th>
+                            <th>Documento</th>
                             <th>Concepto</th>
                             <th>Valor</th>
                             <th>Fecha</th>
@@ -227,6 +231,7 @@
     </div>
 
     <canvas id="watermarkCanvas" width="500" height="400"></canvas>
+    <canvas id="barcodeCanvas" width="200" height="100"></canvas>
 
     <script>
         const { jsPDF } = window.jspdf;
@@ -265,9 +270,39 @@
             return canvas.toDataURL('image/png');
         }
 
+        // Función para generar código de barras
+        function generateBarcode(number) {
+            const canvas = document.getElementById('barcodeCanvas');
+            JsBarcode(canvas, number, {
+                format: 'CODE128',
+                width: 2,
+                height: 60,
+                displayValue: false
+            });
+            return canvas.toDataURL('image/png');
+        }
+
         // Generar imágenes de fondo
         const originalWatermark = createWatermark('ORIGINAL');
         const copyWatermark = createWatermark('COPIA');
+
+        // Función para formatear fecha a dd/mm/aaaa
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        // Función para obtener la hora actual en formato HH:mm:ss
+        function getCurrentTime() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            return `${hours}:${minutes}:${seconds}`;
+        }
 
         // Función para guardar usuarios en localStorage
         function saveUsers() {
@@ -392,6 +427,7 @@
                 row.innerHTML = `
                     <td>${receipt.number}</td>
                     <td>${receipt.payer}</td>
+                    <td>${receipt.payerDocument}</td>
                     <td>${receipt.concept}</td>
                     <td>$ ${receipt.amount}</td>
                     <td>${receipt.date}</td>
@@ -414,6 +450,7 @@
             // Cargar datos en el formulario
             document.getElementById('receiptNumber').value = receipt.number;
             document.getElementById('payerName').value = receipt.payer;
+            document.getElementById('payerDocument').value = receipt.payerDocument;
             document.getElementById('concept').value = receipt.concept;
             document.getElementById('amount').value = receipt.amount;
             document.getElementById('paymentDate').value = receipt.date;
@@ -451,12 +488,13 @@
                 ieLogo: ieData.ieLogo,
                 number: document.getElementById('receiptNumber').value,
                 payer: document.getElementById('payerName').value,
+                payerDocument: document.getElementById('payerDocument').value,
                 concept: document.getElementById('concept').value,
                 amount: document.getElementById('amount').value,
                 date: document.getElementById('paymentDate').value
             };
 
-            if (!receipt.number || !receipt.payer || !receipt.concept || !receipt.amount || !receipt.date) {
+            if (!receipt.number || !receipt.payer || !receipt.payerDocument || !receipt.concept || !receipt.amount || !receipt.date) {
                 alert('Por favor, complete todos los campos del recibo.');
                 return;
             }
@@ -478,6 +516,7 @@
             // Resetear formulario
             document.getElementById('receiptNumber').value = '';
             document.getElementById('payerName').value = '';
+            document.getElementById('payerDocument').value = '';
             document.getElementById('concept').value = '';
             document.getElementById('amount').value = '';
             document.getElementById('paymentDate').value = '';
@@ -497,6 +536,10 @@
                 doc.addImage(receipt.ieLogo, 'PNG', 150, yOffset, 40, 40);
             }
 
+            // Generar código de barras
+            const barcode = generateBarcode(receipt.number);
+            doc.addImage(barcode, 'PNG', 20, yOffset + 100, 80, 20);
+
             doc.setFontSize(16);
             doc.text(receipt.ieName, 20, yOffset + 10);
             doc.setFontSize(12);
@@ -508,9 +551,10 @@
             doc.setFontSize(12);
             doc.text(`Número: ${receipt.number}`, 20, yOffset + 50);
             doc.text(`Pagador: ${receipt.payer}`, 20, yOffset + 60);
+            doc.text(`Documento: ${receipt.payerDocument}`, 20, yOffset + 65);
             doc.text(`Concepto: ${receipt.concept}`, 20, yOffset + 70);
             doc.text(`Valor: $ ${receipt.amount}`, 20, yOffset + 80);
-            doc.text(`Fecha: ${receipt.date}`, 20, yOffset + 90);
+            doc.text(`Fecha: ${formatDate(receipt.date)} ${getCurrentTime()}`, 20, yOffset + 90);
         }
 
         // Función para generar y descargar PDF (ORIGINAL y COPIA)
@@ -570,6 +614,7 @@
                 'RUT': receipt.ieRut,
                 'Número': receipt.number,
                 'Pagador': receipt.payer,
+                'Documento': receipt.payerDocument,
                 'Concepto': receipt.concept,
                 'Valor': receipt.amount,
                 'Fecha': receipt.date
